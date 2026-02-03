@@ -1,0 +1,7 @@
+{
+  "name": "SuperPoupe AI - Lista de Compras Inteligente",
+  "description": "Uma aplicação inteligente de lista de compras para supermercados em Portugal (Lidl, Pingo Doce, Aldi, Makro) com atualização de preços via IA e Google Search.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
