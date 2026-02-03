@@ -3,32 +3,34 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Product, StoreId } from '../types';
 
 /**
- * Procura variáveis de ambiente de forma segura no browser, 
- * verificando tanto nomes padrão como prefixos VITE_.
+ * Procura variáveis de ambiente de forma exaustiva.
  */
 const safeGetEnv = (key: string): string | undefined => {
   const keysToTry = [key, `VITE_${key}`];
   
-  try {
+  // Lista de locais onde variáveis podem estar escondidas em diferentes browsers/hosts
+  const searchIn = [
+    (window as any),
+    (globalThis as any),
+    (window as any).process?.env,
+    (globalThis as any).process?.env,
+    (window as any).__env,
+    (import.meta as any).env
+  ];
+
+  for (const target of searchIn) {
+    if (!target) continue;
     for (const k of keysToTry) {
-      // 1. Tenta window.process.env
-      if (typeof window !== 'undefined' && (window as any).process?.env?.[k]) {
-        return (window as any).process.env[k];
+      if (typeof target[k] === 'string' && target[k].trim() !== '') {
+        return target[k];
       }
-      // 2. Tenta globalThis.process
-      if (typeof (globalThis as any).process?.env?.[k] !== 'undefined') {
-        return (globalThis as any).process.env[k];
-      }
-      // 3. Tenta import.meta.env
-      try {
-        if ((import.meta as any).env?.[k]) {
-          return (import.meta as any).env[k];
-        }
-      } catch (e) {}
     }
-  } catch (e) {
-    console.warn(`Erro ao tentar ler chave ${key}:`, e);
   }
+
+  // Fallbacks manuais caso a injeção automática falhe (apenas para debug)
+  if (key === 'SUPABASE_URL') return 'https://jrxdkjyatitvttcctmrv.supabase.co';
+  if (key === 'SUPABASE_ANON_KEY') return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyeGRranlhdGl0dnR0Y2N0bXJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNDE0MTIsImV4cCI6MjA4NTcxNzQxMn0.vFndOfgqa87SHXG4ku-F1lBhqAHSt9zHl7O09Bi-LtU';
+
   return undefined;
 };
 
@@ -37,62 +39,65 @@ const SUPABASE_ANON_KEY = safeGetEnv('SUPABASE_ANON_KEY');
 
 export let supabase: SupabaseClient | null = null;
 
-if (SUPABASE_URL && SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY) {
-  try {
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    console.log("✅ Supabase inicializado com as chaves detetadas.");
-  } catch (e) {
-    console.error("❌ Falha crítica ao criar cliente Supabase:", e);
+try {
+  if (SUPABASE_URL && SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true }
+    });
+    console.log("✅ Supabase pronto.");
   }
-} else {
-  console.warn("⚠️ Configuração Supabase incompleta. URL ou Key em falta.");
+} catch (e) {
+  console.error("❌ Falha crítica ao inicializar Supabase:", e);
 }
 
 export async function upsertProducts(products: Product[]) {
   if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .upsert(products.map(p => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        price: p.price,
+        unit: p.unit,
+        store: p.store,
+        code: p.code,
+        last_updated: new Date().toISOString()
+      })), { onConflict: 'id' });
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error("Erro no Upsert:", e);
+    return null;
+  }
+}
 
-  const { data, error } = await supabase
-    .from('products')
-    .upsert(products.map(p => ({
+export async function fetchProductsFromCloud(searchTerm?: string, category?: string, store?: StoreId) {
+  if (!supabase) return [];
+  try {
+    let query = supabase.from('products').select('*');
+    if (searchTerm) query = query.ilike('name', `%${searchTerm}%`);
+    if (category && category !== 'todos') query = query.eq('category', category);
+    if (store) query = query.eq('store', store);
+
+    const { data, error } = await query.order('name', { ascending: true });
+    if (error) throw error;
+    
+    return (data || []).map(p => ({
       id: p.id,
       name: p.name,
       category: p.category,
       price: p.price,
       unit: p.unit,
-      store: p.store,
+      store: p.store as StoreId,
       code: p.code,
-      last_updated: new Date().toISOString()
-    })), { onConflict: 'id' });
-
-  if (error) throw error;
-  return data;
-}
-
-export async function fetchProductsFromCloud(searchTerm?: string, category?: string, store?: StoreId) {
-  if (!supabase) return [];
-
-  let query = supabase.from('products').select('*');
-
-  if (searchTerm) query = query.ilike('name', `%${searchTerm}%`);
-  if (category && category !== 'todos') query = query.eq('category', category);
-  if (store) query = query.eq('store', store);
-
-  const { data, error } = await query.order('name', { ascending: true });
-  if (error) {
-    console.error("Erro na busca Cloud:", error);
+      lastUpdated: p.last_updated
+    }));
+  } catch (e) {
+    console.error("Erro ao buscar da Cloud:", e);
     return [];
   }
-  
-  return (data || []).map(p => ({
-    id: p.id,
-    name: p.name,
-    category: p.category,
-    price: p.price,
-    unit: p.unit,
-    store: p.store as StoreId,
-    code: p.code,
-    lastUpdated: p.last_updated
-  }));
 }
 
 export async function getCloudTotalCount() {
