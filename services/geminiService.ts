@@ -1,86 +1,63 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { Product, StoreId, PriceUpdateResult, GroundingSource } from "../types";
+import { Product, StoreId, PriceUpdateResult } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const safeGetEnv = (key: string): string | undefined => {
+  const keysToTry = [key, `VITE_${key}`];
+  try {
+    for (const k of keysToTry) {
+      if (typeof window !== 'undefined' && (window as any).process?.env?.[k]) return (window as any).process.env[k];
+      if (typeof (globalThis as any).process?.env?.[k] !== 'undefined') return (globalThis as any).process.env[k];
+      try {
+        if ((import.meta as any).env?.[k]) return (import.meta as any).env[k];
+      } catch(e) {}
+    }
+  } catch { }
+  return undefined;
+};
 
-/**
- * Função Mestra para Varredura de Catálogo.
- * Usa pesquisa avançada para encontrar listas de produtos.
- */
+const getAI = () => {
+  const apiKey = safeGetEnv('API_KEY');
+  if (!apiKey) throw new Error("API_KEY_MISSING");
+  return new GoogleGenAI({ apiKey });
+};
+
 export async function fetchCategoryProducts(
   storeName: string, 
-  categoryName: string, 
-  offset: number = 0
+  categoryName: string
 ): Promise<PriceUpdateResult> {
-  const ai = getAI();
-  const model = "gemini-3-flash-preview";
-  
-  // Estratégia de pesquisa mais robusta: site search
-  const searchQuery = `site:continente.pt produtos ${categoryName} preço "adicionar"`;
-
-  const prompt = `Utilize o Google Search para listar artigos da categoria "${categoryName}" no site continente.pt.
-  
-  INSTRUÇÕES:
-  1. Procure nomes de produtos, preços (ex: 2.99€), unidades (kg, un, pack) e se possível o SKU/Referência.
-  2. Extraia o nome LITERAL (ex: "Cebola Castanha Continente pack 2kg").
-  
-  Responda APENAS com um JSON Array seguindo este modelo exato:
-  [{"name": "string", "price": number, "unit": "string", "code": "string"}]
-  
-  Se não encontrar nada, responda [].`;
-
   try {
+    const ai = getAI();
+    const model = "gemini-3-flash-preview";
+    const prompt = `Utilize o Google Search para listar artigos da categoria "${categoryName}" no site continente.pt. Responda APENAS com um JSON Array: [{"name": "string", "price": number, "unit": "string", "code": "string"}]`;
+
     const response = await ai.models.generateContent({
-      model: model,
+      model,
       contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-      },
+      config: { tools: [{ googleSearch: {} }], responseMimeType: "application/json" },
     });
 
     return processResponse(response, storeName, categoryName);
   } catch (error: any) {
-    console.error("Erro na busca de catálogo:", error);
-    const errStr = JSON.stringify(error);
-    if (errStr.includes("429") || error?.status === 429 || error?.status === "RESOURCE_EXHAUSTED") {
-      throw new Error("QUOTA_EXHAUSTED");
-    }
+    console.error("Erro Gemini:", error);
     throw error;
   }
 }
 
-/**
- * Pesquisa individual de alta precisão.
- */
 export async function searchSpecificProduct(storeName: string, query: string): Promise<PriceUpdateResult> {
-  const ai = getAI();
-  const model = "gemini-3-flash-preview";
-  
-  const prompt = `Localize este artigo específico no site do Continente (continente.pt): "${query}".
-  Preciso do NOME COMPLETO, PREÇO e UNIDADE.
-  
-  Responda APENAS com um JSON Array:
-  [{"name": "NOME LITERAL", "price": 0.00, "unit": "kg/un", "code": "REF"}]`;
-
   try {
+    const ai = getAI();
+    const model = "gemini-3-flash-preview";
+    const prompt = `Localize este artigo no site continente.pt: "${query}". Responda APENAS JSON: [{"name": "string", "price": number, "unit": "string", "code": "string"}]`;
+
     const response = await ai.models.generateContent({
-      model: model,
+      model,
       contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-      },
+      config: { tools: [{ googleSearch: {} }], responseMimeType: "application/json" },
     });
     
-    return processResponse(response, storeName, "Pesquisa Online");
-  } catch (e: any) {
-    console.error("Erro na pesquisa específica:", e);
-    const errStr = JSON.stringify(e);
-    if (errStr.includes("429") || e?.status === 429) {
-      throw new Error("QUOTA_EXHAUSTED");
-    }
+    return processResponse(response, storeName, "Pesquisa");
+  } catch (e) {
     return { products: [], sources: [] };
   }
 }
@@ -88,43 +65,27 @@ export async function searchSpecificProduct(storeName: string, query: string): P
 function processResponse(response: any, storeName: string, category: string): PriceUpdateResult {
   const text = response.text || "[]";
   let parsedProducts: any[] = [];
-  
   try {
-    const cleanJson = text.replace(/```json|```/g, "").trim();
-    parsedProducts = JSON.parse(cleanJson);
+    parsedProducts = JSON.parse(text.replace(/```json|```/g, ""));
   } catch (e) {
-    const match = text.match(/\[[\s\S]*\]/);
-    if (match) {
-      try { parsedProducts = JSON.parse(match[0]); } catch { parsedProducts = []; }
-    }
+    const match = text.match(/\[.*\]/s);
+    if (match) parsedProducts = JSON.parse(match[0]);
   }
-
-  if (!Array.isArray(parsedProducts)) parsedProducts = [parsedProducts];
 
   const storeId = storeName.toLowerCase().replace(/\s+/g, "-") as StoreId;
-  const products: Product[] = parsedProducts
-    .filter(p => p && p.name)
-    .map((p) => {
-      const productId = p.code ? `${storeId}-${p.code}` : `${storeId}-${p.name.trim().replace(/\s+/g, '-').toLowerCase()}`;
-      return {
-        id: productId,
+  return {
+    products: (Array.isArray(parsedProducts) ? parsedProducts : [parsedProducts])
+      .filter(p => p && p.name)
+      .map(p => ({
+        id: p.code ? `${storeId}-${p.code}` : `${storeId}-${p.name.replace(/\s+/g, '-').toLowerCase()}`,
         name: p.name.trim(),
-        price: typeof p.price === 'number' ? p.price : parseFloat(String(p.price || "0").replace(',', '.')) || 0,
+        price: typeof p.price === 'number' ? p.price : parseFloat(String(p.price).replace(',', '.')) || 0,
         unit: p.unit || "un",
-        category: p.category || category,
+        category: category,
         lastUpdated: new Date().toISOString(),
         store: storeId,
-        code: p.code || undefined
-      };
-    });
-
-  const sources: GroundingSource[] = [];
-  const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-  if (chunks) {
-    chunks.forEach((chunk: any) => {
-      if (chunk.web) sources.push({ title: chunk.web.title, uri: chunk.web.uri });
-    });
-  }
-
-  return { products, sources };
+        code: p.code
+      })),
+    sources: []
+  };
 }
