@@ -39,4 +39,5 @@ export interface Category {
   id: string;
   name: string;
   icon: string;
+  url?: string; // URL direta para scraping
 }
