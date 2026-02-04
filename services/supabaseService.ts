@@ -31,6 +31,7 @@ export async function upsertProducts(products: Product[]) {
     price: p.price,
     unit: p.unit.trim(),
     store: p.store,
+    image_url: p.imageUrl || null,
     code: p.code || p.id,
     last_updated: new Date().toISOString()
   }));
@@ -60,6 +61,7 @@ export async function fetchProductsFromCloud(searchTerm?: string, category?: str
       category: p.category,
       price: p.price,
       unit: p.unit,
+      imageUrl: p.image_url,
       store: p.store as StoreId,
       code: p.code,
       lastUpdated: p.last_updated

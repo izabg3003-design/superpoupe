@@ -9,6 +9,7 @@ export interface Product {
   lastUpdated: string;
   store: StoreId;
   unit: string;
+  imageUrl?: string;
   code?: string;
 }
 
