@@ -3,13 +3,8 @@ import { GoogleGenAI } from "@google/genai";
 import { Product, StoreId, PriceUpdateResult, GroundingSource } from "../types";
 import { STORE_DOMAINS } from "../constants";
 
-// Fixed: Use process.env.API_KEY directly as required by guidelines
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-/**
- * Realiza um "Deep Scrape" simulado via Google Search Grounding.
- * Para volumes grandes (3000+), deve ser chamado em loop/lotes no frontend.
- */
 export async function fetchCategoryProducts(
   storeId: StoreId, 
   categoryName: string,
@@ -20,19 +15,12 @@ export async function fetchCategoryProducts(
   try {
     const model = "gemini-3-flash-preview";
     
-    // Prompt ultra-potencializado para extrair o máximo de itens por chamada
-    const prompt = `Aja como um Robô de Extração de Dados em Tempo Real. 
+    const prompt = `Aja como um Extrator de E-commerce. 
     DESTINO: ${targetUrl || `https://www.${domain}`}
     CATEGORIA: ${categoryName}
-    CONTEXTO: Esta categoria contém milhares de itens. Você deve extrair uma lista de pelo menos 25 a 30 produtos diferentes que ainda não foram listados (Lote #${batchIndex}).
-    
-    INSTRUÇÕES CRÍTICAS:
-    1. Aceda EXCLUSIVAMENTE ao site do ${storeId} (${domain}).
-    2. Extraia: Nome exato do produto, Preço atual em €, Unidade (kg, un, pack) e Código/EAN se disponível.
-    3. Retorne APENAS um JSON Array no formato: [{"name": "string", "price": number, "unit": "string", "code": "string"}].
-    4. Não adicione texto explicativo.`;
+    TAREFA: Extraia 25 produtos com: Nome, Preço e Unidade.
+    RETORNO: APENAS JSON Array: [{"name": "string", "price": number, "unit": "string", "code": "string"}]`;
 
-    // Fixed: Always use ai.models.generateContent to query GenAI with both model and prompt
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -44,24 +32,19 @@ export async function fetchCategoryProducts(
 
     return processResponse(response, storeId, categoryName);
   } catch (error: any) {
-    console.error(`Erro no rastreio profundo de ${domain}:`, error);
+    console.error(`Erro no rastreio:`, error);
     throw error;
   }
 }
 
-/**
- * Busca um produto específico em tempo real
- */
 export async function searchSpecificProduct(storeId: StoreId | 'todos', query: string): Promise<PriceUpdateResult> {
-  const targetDomain = storeId === 'todos' ? 'sites de supermercados em Portugal (Continente, Pingo Doce, Lidl)' : STORE_DOMAINS[storeId];
+  const targetDomain = storeId === 'todos' ? 'supermercados em Portugal' : STORE_DOMAINS[storeId];
   
   try {
     const model = "gemini-3-flash-preview";
-    const prompt = `Localize este artigo específico no site ${targetDomain}: "${query}". 
-    Retorne o preço exato e atual.
-    FORMATO JSON: [{"name": "string", "price": number, "unit": "string", "code": "string", "store": "string"}].`;
+    const prompt = `Localize o artigo "${query}" no site ${targetDomain}.
+    FORMATO JSON: [{"name": "string", "price": number, "unit": "string", "store": "string"}]`;
 
-    // Fixed: Always use ai.models.generateContent to query GenAI with both model and prompt
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -78,7 +61,6 @@ export async function searchSpecificProduct(storeId: StoreId | 'todos', query: s
 }
 
 function processResponse(response: any, storeId: StoreId, category: string): PriceUpdateResult {
-  // Fixed: The response object features a text property (not a method)
   const text = response.text || "[]";
   let parsedProducts: any[] = [];
   
@@ -105,14 +87,14 @@ function processResponse(response: any, storeId: StoreId, category: string): Pri
         ? p.store as StoreId : storeId;
 
       return {
-        id: p.code ? `${finalStoreId}-${p.code}` : `${finalStoreId}-${p.name.replace(/\s+/g, '-').toLowerCase()}`,
+        id: p.code ? `${finalStoreId}-${p.code}` : `u${Math.random().toString(36).substring(7)}`,
         name: p.name.trim(),
         price: typeof p.price === 'number' ? p.price : parseFloat(String(p.price).replace(',', '.')) || 0,
         unit: p.unit || "un",
         category: category,
         lastUpdated: new Date().toISOString(),
         store: finalStoreId,
-        code: p.code || Math.random().toString(36).substring(7)
+        code: p.code
       };
     });
 

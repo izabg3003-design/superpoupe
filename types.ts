@@ -9,7 +9,7 @@ export interface Product {
   lastUpdated: string;
   store: StoreId;
   unit: string;
-  code?: string; // Product code, SKU or EAN
+  code?: string;
 }
 
 export interface ShoppingItem extends Product {
@@ -39,5 +39,5 @@ export interface Category {
   id: string;
   name: string;
   icon: string;
-  url?: string; // URL direta para scraping
+  url?: string;
 }
