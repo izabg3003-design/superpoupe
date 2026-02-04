@@ -17,13 +17,14 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   try {
     supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   } catch (e) {
-    console.error("Erro Supabase:", e);
+    console.error("Erro na inicialização do Supabase:", e);
   }
 }
 
 export async function upsertProducts(products: Product[]) {
   if (!supabase || products.length === 0) return null;
   
+  // Mapeamento EXATO para colunas snake_case do Postgres
   const payload = products.map(p => ({
     id: p.id,
     name: p.name.trim(),
@@ -31,17 +32,24 @@ export async function upsertProducts(products: Product[]) {
     price: p.price,
     unit: p.unit.trim(),
     store: p.store,
-    image_url: p.imageUrl || null,
+    image_url: p.imageUrl || null, // Coluna confirmada ou necessária no DB
     code: p.code || p.id,
-    last_updated: new Date().toISOString()
+    last_updated: new Date().toISOString() // Coluna confirmada pelo usuário
   }));
 
-  const { data, error } = await supabase
-    .from('products')
-    .upsert(payload, { onConflict: 'id' });
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .upsert(payload, { onConflict: 'id' });
 
-  if (error) throw error;
-  return data;
+    if (error) {
+      console.error("Supabase Upsert Error:", error);
+      throw error;
+    }
+    return data;
+  } catch (err: any) {
+    throw err;
+  }
 }
 
 export async function fetchProductsFromCloud(searchTerm?: string, category?: string, store?: StoreId) {
@@ -59,20 +67,26 @@ export async function fetchProductsFromCloud(searchTerm?: string, category?: str
       id: p.id,
       name: p.name,
       category: p.category,
-      price: p.price,
+      price: Number(p.price),
       unit: p.unit,
-      imageUrl: p.image_url,
+      imageUrl: p.image_url || null,
       store: p.store as StoreId,
       code: p.code,
       lastUpdated: p.last_updated
     }));
-  } catch (e) {
-    return [];
+  } catch (e: any) {
+    console.error("Erro ao buscar da Cloud:", e);
+    throw e;
   }
 }
 
 export async function getCloudTotalCount() {
   if (!supabase) return 0;
-  const { count } = await supabase.from('products').select('*', { count: 'exact', head: true });
-  return count || 0;
+  try {
+    const { count, error } = await supabase.from('products').select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return count || 0;
+  } catch (e) {
+    return 0;
+  }
 }
