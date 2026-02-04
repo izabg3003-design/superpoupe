@@ -24,23 +24,17 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
 export async function upsertProducts(products: Product[]) {
   if (!supabase || products.length === 0) return null;
   
-  // Garantia extra de desduplicação por ID para evitar erro de row modification múltipla no Postgres
-  const uniqueItems = new Map<string, any>();
-  
-  products.forEach(p => {
-    uniqueItems.set(p.id, {
-      id: p.id,
-      name: p.name,
-      category: p.category,
-      price: p.price,
-      unit: p.unit,
-      store: p.store,
-      code: p.code || p.id,
-      last_updated: p.lastUpdated || new Date().toISOString()
-    });
-  });
-
-  const payload = Array.from(uniqueItems.values());
+  // Mapeamento rigoroso para o banco de dados
+  const payload = products.map(p => ({
+    id: p.id,
+    name: p.name.trim(),
+    category: p.category,
+    price: p.price,
+    unit: p.unit.trim(),
+    store: p.store,
+    code: p.code || p.id,
+    last_updated: new Date().toISOString()
+  }));
 
   const { data, error } = await supabase
     .from('products')
@@ -50,7 +44,7 @@ export async function upsertProducts(products: Product[]) {
     });
 
   if (error) {
-    console.error("Erro no Upsert Supabase:", error.message);
+    console.error("Erro Supabase Upsert:", error.message);
     throw error;
   }
   return data;
@@ -68,8 +62,8 @@ export async function fetchProductsFromCloud(searchTerm?: string, category?: str
     if (searchTerm) query = query.ilike('name', `%${searchTerm}%`);
     if (category && category !== 'todos') query = query.eq('category', category);
 
-    // Aumentar o limite para mostrar mais itens de uma vez
-    const { data, error } = await query.order('name', { ascending: true }).limit(1000);
+    // Aumentado o limite para 2500 itens para suportar catálogos densos
+    const { data, error } = await query.order('name', { ascending: true }).limit(2500);
     if (error) throw error;
     
     return (data || []).map(p => ({
