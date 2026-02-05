@@ -278,7 +278,15 @@ const App: React.FC = () => {
                          <input type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleFilePreview(p.id, e.target.files[0])} />
                        </label>
                      </div>
-                     <p className="font-black text-[10px] uppercase truncate mb-2 px-1">{p.name}</p>
+                     
+                     <div className="mb-3 px-1 space-y-1">
+                        <p className="font-black text-[11px] uppercase leading-tight text-slate-800 h-8 overflow-hidden line-clamp-2" title={p.name}>{p.name}</p>
+                        <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
+                          <span className="text-blue-600">{p.price.toFixed(2)}€</span>
+                          <span className="bg-slate-200 px-1.5 py-0.5 rounded text-[8px]">{p.unit}</span>
+                        </div>
+                     </div>
+
                      <button 
                         onClick={() => saveProductImage(p)}
                         disabled={savingProductId === p.id}
